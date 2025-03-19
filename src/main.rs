@@ -10,7 +10,8 @@ mod error;
 
 use clap::Parser;
 use anyhow::Context;
-use std::path::PathBuf;
+use tokio::signal;
+use std::{collections::HashMap, path::PathBuf};
 use controller::ProcessorController;
 
 #[derive(Parser, Debug)]
@@ -90,35 +91,92 @@ fn main() -> anyhow::Result<()> {
     
     // 为了让reqwest库使用这些代理，还需要确保它的配置使用系统代理
     
-    // 创建处理器控制器
-    match ProcessorController::new(
-        cli.media_folder,
-        cli.output_folder,
-        cli.max_retries,
-        cli.max_workers,
-        cli.use_jianying_first,
-        cli.use_kuaishou,
-        cli.use_bcut,
-        cli.format_text,
-        cli.include_timestamps,
-        cli.show_progress,
-        cli.process_video,
-        cli.extract_audio_only,
-        cli.watch_mode,
-    ) {
-        Ok(controller) => {
-            // 开始处理
-            if let Err(e) = controller.start_processing() {
-                log::error!("处理过程中发生错误: {}", e);
-                return Err(anyhow::anyhow!("处理过程中发生错误: {}", e));
-            }
-        },
-        Err(e) => {
-            log::error!("创建处理器控制器失败: {}", e);
-            return Err(anyhow::anyhow!("创建处理器控制器失败: {}", e));
-        }
-    }
+      // 构建配置参数字典
+      let mut config_params = HashMap::new();
     
-    log::info!("程序执行完毕。");
-    Ok(())
+      if let Some(media_folder) = cli.media_folder {
+          config_params.insert("media_folder".to_string(), serde_json::to_value(media_folder)?);
+      }
+      
+      if let Some(output_folder) = cli.output_folder {
+          config_params.insert("output_folder".to_string(), serde_json::to_value(output_folder)?);
+      }
+      
+      if let Some(max_retries) = cli.max_retries {
+          config_params.insert("max_retries".to_string(), serde_json::to_value(max_retries)?);
+      }
+      
+      if let Some(max_workers) = cli.max_workers {
+          config_params.insert("max_workers".to_string(), serde_json::to_value(max_workers)?);
+      }
+      
+      if let Some(use_jianying_first) = cli.use_jianying_first {
+          config_params.insert("use_jianying_first".to_string(), serde_json::to_value(use_jianying_first)?);
+      }
+      
+      if let Some(use_kuaishou) = cli.use_kuaishou {
+          config_params.insert("use_kuaishou".to_string(), serde_json::to_value(use_kuaishou)?);
+      }
+      
+      if let Some(use_bcut) = cli.use_bcut {
+          config_params.insert("use_bcut".to_string(), serde_json::to_value(use_bcut)?);
+      }
+      
+      if let Some(format_text) = cli.format_text {
+          config_params.insert("format_text".to_string(), serde_json::to_value(format_text)?);
+      }
+      
+      if let Some(include_timestamps) = cli.include_timestamps {
+          config_params.insert("include_timestamps".to_string(), serde_json::to_value(include_timestamps)?);
+      }
+      
+      if let Some(show_progress) = cli.show_progress {
+          config_params.insert("show_progress".to_string(), serde_json::to_value(show_progress)?);
+      }
+      
+      if let Some(process_video) = cli.process_video {
+          config_params.insert("process_video".to_string(), serde_json::to_value(process_video)?);
+      }
+      
+      if let Some(extract_audio_only) = cli.extract_audio_only {
+          config_params.insert("extract_audio_only".to_string(), serde_json::to_value(extract_audio_only)?);
+      }
+      
+      if let Some(watch_mode) = cli.watch_mode {
+          config_params.insert("watch_mode".to_string(), serde_json::to_value(watch_mode)?);
+      }
+      
+      // 创建处理器控制器
+      let controller = ProcessorController::new(
+          cli.config.as_deref(),
+          if config_params.is_empty() { None } else { Some(config_params) },
+      )?;
+      
+      // 创建中断处理任务
+      let controller_clone = controller.clone();
+      let interrupt_handler = tokio::spawn(async move {
+          if let Ok(()) = signal::ctrl_c().await {
+              log::warn!("\n\n⚠️ 接收到中断信号，正在安全终止程序...\n稍等片刻，正在保存已处理的数据...\n");
+              controller_clone.set_interrupt_flag(true);
+          }
+      });
+      
+      // 启动处理
+      let processing = controller.start_processing();
+      
+      // 等待处理完成或中断
+    //   tokio::select! {
+    //       _ = interrupt_handler => {
+    //           // 中断处理器已完成，执行清理操作
+    //       }
+    //       result = processing => {
+    //           if let Err(e) = result {
+    //               log::error!("\n程序执行出错: {}", e);
+    //               return Err(e);
+    //           }
+    //       }
+    //   }
+      
+      log::info!("\n程序执行完毕。");
+      Ok(())
 }
