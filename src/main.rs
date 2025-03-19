@@ -5,101 +5,120 @@ mod asr;
 mod processing;
 mod ui;
 mod controller;
+mod logging;
+mod error;
 
-use anyhow::{Context, Result};
-use std::env;
-use tracing::{info, warn, error, Level};
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
-use controller::Controller;
-use core::file_utils::check_ffmpeg_available;
-use indicatif::{ProgressBar, ProgressStyle};
+use clap::Parser;
+use anyhow::Context;
+use std::path::PathBuf;
+use controller::ProcessorController;
 
-fn check_dependencies() -> Result<bool> {
-    info!("检查系统依赖...");
+#[derive(Parser, Debug)]
+#[clap(author, version, about = "音频处理和转写工具")]
+struct Cli {
+    /// 媒体文件夹路径
+    #[clap(long, default_value = "D:/download/")]
+    media_folder: PathBuf,
     
-    // 检查 FFmpeg
-    if !check_ffmpeg_available() {
-        warn!("警告: 未检测到FFmpeg，转换视频需要FFmpeg支持");
-        println!("\n警告: 未检测到FFmpeg，转换视频需要FFmpeg支持");
-        println!("请安装FFmpeg: https://ffmpeg.org/download.html");
-        println!("安装后确保将FFmpeg添加到系统PATH中\n");
-        return Ok(false);
-    }
+    /// 输出文件夹路径
+    #[clap(long, default_value = "D:/download/dest/")]
+    output_folder: PathBuf,
     
-    info!("所有依赖检查通过");
-    Ok(true)
+    /// 最大重试次数
+    #[clap(long, default_value = "3")]
+    max_retries: u32,
+    
+    /// 最大工作线程数
+    #[clap(long, default_value = "4")]
+    max_workers: u32,
+    
+    /// 是否优先使用剪映ASR
+    #[clap(long)]
+    use_jianying_first: bool,
+    
+    /// 是否使用快手ASR
+    #[clap(long)]
+    use_kuaishou: bool,
+    
+    /// 是否使用必剪ASR
+    #[clap(long)]
+    use_bcut: bool,
+    
+    /// 是否格式化文本
+    #[clap(long)]
+    format_text: bool,
+    
+    /// 是否包含时间戳
+    #[clap(long)]
+    include_timestamps: bool,
+    
+    /// 是否显示进度条
+    #[clap(long)]
+    show_progress: bool,
+    
+    /// 是否处理视频
+    #[clap(long)]
+    process_video: bool,
+    
+    /// 是否仅提取音频
+    #[clap(long)]
+    extract_audio_only: bool,
+    
+    /// 是否启用监控模式
+    #[clap(long)]
+    watch_mode: bool,
+    
+    /// 日志文件路径
+    #[clap(long)]
+    log_file: Option<PathBuf>,
 }
 
-fn setup_logging() -> Result<()> {
-    let subscriber = tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::CLOSE)
-        .with_max_level(Level::INFO)
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .with_file(true)
-        .with_line_number(true)
-        .pretty();
-    
-    subscriber.init();
-    Ok(())
-}
-
-fn set_proxy() {
-    info!("设置系统代理...");
-    env::set_var("HTTP_PROXY", "http://127.0.0.1:7890");
-    env::set_var("HTTPS_PROXY", "http://127.0.0.1:7890");
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    // 设置日志系统
-    setup_logging()?;
-    info!("程序启动...");
-    
+fn main() -> anyhow::Result<()> {
     // 解析命令行参数
-    let cli_args = cli::parse_args();
+    let cli = Cli::parse();
     
-    // 检查依赖
-    if !check_dependencies()? {
-        error!("依赖检查失败，程序退出");
-        std::process::exit(1);
-    }
+    // 设置日志
+    logging::setup_logging(cli.log_file.as_deref())
+        .context("无法设置日志系统")?;
     
-    // 设置代理
-    set_proxy();
+  
     
-    info!("初始化音频处理器...");
+    // 设置代理(如果需要)
+    // Rust中设置环境变量
+    std::env::set_var("HTTP_PROXY", "http://127.0.0.1:7890");
+    std::env::set_var("HTTPS_PROXY", "http://127.0.0.1:7890");
     
-    // 创建并配置控制器
-    let mut controller = Controller::new(
-        "D:/download/",                // media_folder
-        "D:/download/dest/",           // output_folder
-        3,                             // max_retries
-        4,                             // max_workers
-        true,                          // use_jianying_first
-        true,                          // use_kuaishou
-        true,                          // use_bcut
-        true,                          // format_text
-        true,                          // include_timestamps
-        true,                          // show_progress
-        true,                          // process_video
-        false,                         // extract_audio_only
-        true,                          // watch_mode
-    ).context("创建控制器失败")?;
+    // 为了让reqwest库使用这些代理，还需要确保它的配置使用系统代理
     
-    // 开始处理
-    info!("开始处理任务...");
-    match controller.start_processing().await {
-        Ok(_) => info!("所有任务处理完成"),
+    // 创建处理器控制器
+    match ProcessorController::new(
+        cli.media_folder,
+        cli.output_folder,
+        cli.max_retries,
+        cli.max_workers,
+        cli.use_jianying_first,
+        cli.use_kuaishou,
+        cli.use_bcut,
+        cli.format_text,
+        cli.include_timestamps,
+        cli.show_progress,
+        cli.process_video,
+        cli.extract_audio_only,
+        cli.watch_mode,
+    ) {
+        Ok(controller) => {
+            // 开始处理
+            if let Err(e) = controller.start_processing() {
+                log::error!("处理过程中发生错误: {}", e);
+                return Err(anyhow::anyhow!("处理过程中发生错误: {}", e));
+            }
+        },
         Err(e) => {
-            error!("处理过程中出错: {}", e);
-            error!("详细错误信息: {:?}", e);
+            log::error!("创建处理器控制器失败: {}", e);
+            return Err(anyhow::anyhow!("创建处理器控制器失败: {}", e));
         }
     }
     
-    info!("程序执行完毕");
-    
+    log::info!("程序执行完毕。");
     Ok(())
 }
