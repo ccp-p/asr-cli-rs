@@ -8,81 +8,20 @@ mod controller;
 mod logging;
 mod error;
 
-use clap::Parser;
 use anyhow::Context;
 use tokio::signal;
 use std::{collections::HashMap, path::PathBuf};
 use controller::ProcessorController;
-
-#[derive(Parser, Debug)]
-#[clap(author, version, about = "音频处理和转写工具")]
-struct Cli {
-    /// 媒体文件夹路径
-    #[clap(long, default_value = "D:/download/")]
-    media_folder: PathBuf,
-    
-    /// 输出文件夹路径
-    #[clap(long, default_value = "D:/download/dest/")]
-    output_folder: PathBuf,
-    
-    /// 最大重试次数
-    #[clap(long, default_value = "3")]
-    max_retries: u32,
-    
-    /// 最大工作线程数
-    #[clap(long, default_value = "4")]
-    max_workers: u32,
-    
-    /// 是否优先使用剪映ASR
-    #[clap(long)]
-    use_jianying_first: bool,
-    
-    /// 是否使用快手ASR
-    #[clap(long)]
-    use_kuaishou: bool,
-    
-    /// 是否使用必剪ASR
-    #[clap(long)]
-    use_bcut: bool,
-    
-    /// 是否格式化文本
-    #[clap(long)]
-    format_text: bool,
-    
-    /// 是否包含时间戳
-    #[clap(long)]
-    include_timestamps: bool,
-    
-    /// 是否显示进度条
-    #[clap(long)]
-    show_progress: bool,
-    
-    /// 是否处理视频
-    #[clap(long)]
-    process_video: bool,
-    
-    /// 是否仅提取音频
-    #[clap(long)]
-    extract_audio_only: bool,
-    
-    /// 是否启用监控模式
-    #[clap(long)]
-    watch_mode: bool,
-    
-    /// 日志文件路径
-    #[clap(long)]
-    log_file: Option<PathBuf>,
-}
+use crate::cli::parse_args;
 
 fn main() -> anyhow::Result<()> {
     // 解析命令行参数
-    let cli = Cli::parse();
+    let cli =parse_args();
     
     // 设置日志
     logging::setup_logging(cli.log_file.as_deref())
         .context("无法设置日志系统")?;
     
-  
     
     // 设置代理(如果需要)
     // Rust中设置环境变量
@@ -110,9 +49,8 @@ fn main() -> anyhow::Result<()> {
         config_params.insert("watch_mode".to_string(), serde_json::to_value(cli.watch_mode)?);
         
   
-        // 创建处理器控制器
         let controller = ProcessorController::new(
-            cli.config.as_deref(), // 注意: cli.config 在您的 Cli 结构体中似乎没有定义
+            None,  // 没有配置文件
             Some(config_params),
         )?;
 
