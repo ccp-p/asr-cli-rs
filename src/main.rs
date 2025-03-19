@@ -94,89 +94,39 @@ fn main() -> anyhow::Result<()> {
       // 构建配置参数字典
       let mut config_params = HashMap::new();
     
-      if let Some(media_folder) = cli.media_folder {
-          config_params.insert("media_folder".to_string(), serde_json::to_value(media_folder)?);
-      }
-      
-      if let Some(output_folder) = cli.output_folder {
-          config_params.insert("output_folder".to_string(), serde_json::to_value(output_folder)?);
-      }
-      
-      if let Some(max_retries) = cli.max_retries {
-          config_params.insert("max_retries".to_string(), serde_json::to_value(max_retries)?);
-      }
-      
-      if let Some(max_workers) = cli.max_workers {
-          config_params.insert("max_workers".to_string(), serde_json::to_value(max_workers)?);
-      }
-      
-      if let Some(use_jianying_first) = cli.use_jianying_first {
-          config_params.insert("use_jianying_first".to_string(), serde_json::to_value(use_jianying_first)?);
-      }
-      
-      if let Some(use_kuaishou) = cli.use_kuaishou {
-          config_params.insert("use_kuaishou".to_string(), serde_json::to_value(use_kuaishou)?);
-      }
-      
-      if let Some(use_bcut) = cli.use_bcut {
-          config_params.insert("use_bcut".to_string(), serde_json::to_value(use_bcut)?);
-      }
-      
-      if let Some(format_text) = cli.format_text {
-          config_params.insert("format_text".to_string(), serde_json::to_value(format_text)?);
-      }
-      
-      if let Some(include_timestamps) = cli.include_timestamps {
-          config_params.insert("include_timestamps".to_string(), serde_json::to_value(include_timestamps)?);
-      }
-      
-      if let Some(show_progress) = cli.show_progress {
-          config_params.insert("show_progress".to_string(), serde_json::to_value(show_progress)?);
-      }
-      
-      if let Some(process_video) = cli.process_video {
-          config_params.insert("process_video".to_string(), serde_json::to_value(process_video)?);
-      }
-      
-      if let Some(extract_audio_only) = cli.extract_audio_only {
-          config_params.insert("extract_audio_only".to_string(), serde_json::to_value(extract_audio_only)?);
-      }
-      
-      if let Some(watch_mode) = cli.watch_mode {
-          config_params.insert("watch_mode".to_string(), serde_json::to_value(watch_mode)?);
-      }
-      
-      // 创建处理器控制器
-      let controller = ProcessorController::new(
-          cli.config.as_deref(),
-          if config_params.is_empty() { None } else { Some(config_params) },
-      )?;
-      
-      // 创建中断处理任务
-      let controller_clone = controller.clone();
-      let interrupt_handler = tokio::spawn(async move {
-          if let Ok(()) = signal::ctrl_c().await {
-              log::warn!("\n\n⚠️ 接收到中断信号，正在安全终止程序...\n稍等片刻，正在保存已处理的数据...\n");
-              controller_clone.set_interrupt_flag(true);
-          }
-      });
-      
-      // 启动处理
-      let processing = controller.start_processing();
-      
-      // 等待处理完成或中断
-    //   tokio::select! {
-    //       _ = interrupt_handler => {
-    //           // 中断处理器已完成，执行清理操作
-    //       }
-    //       result = processing => {
-    //           if let Err(e) = result {
-    //               log::error!("\n程序执行出错: {}", e);
-    //               return Err(e);
-    //           }
-    //       }
-    //   }
-      
+    // 直接添加已有的值，不需要使用 if let Some 模式
+        config_params.insert("media_folder".to_string(), serde_json::to_value(&cli.media_folder)?);
+        config_params.insert("output_folder".to_string(), serde_json::to_value(&cli.output_folder)?);
+        config_params.insert("max_retries".to_string(), serde_json::to_value(cli.max_retries)?);
+        config_params.insert("max_workers".to_string(), serde_json::to_value(cli.max_workers)?);
+        config_params.insert("use_jianying_first".to_string(), serde_json::to_value(cli.use_jianying_first)?);
+        config_params.insert("use_kuaishou".to_string(), serde_json::to_value(cli.use_kuaishou)?);
+        config_params.insert("use_bcut".to_string(), serde_json::to_value(cli.use_bcut)?);
+        config_params.insert("format_text".to_string(), serde_json::to_value(cli.format_text)?);
+        config_params.insert("include_timestamps".to_string(), serde_json::to_value(cli.include_timestamps)?);
+        config_params.insert("show_progress".to_string(), serde_json::to_value(cli.show_progress)?);
+        config_params.insert("process_video".to_string(), serde_json::to_value(cli.process_video)?);
+        config_params.insert("extract_audio_only".to_string(), serde_json::to_value(cli.extract_audio_only)?);
+        config_params.insert("watch_mode".to_string(), serde_json::to_value(cli.watch_mode)?);
+        
+  
+        // 创建处理器控制器
+        let controller = ProcessorController::new(
+            cli.config.as_deref(), // 注意: cli.config 在您的 Cli 结构体中似乎没有定义
+            Some(config_params),
+        )?;
+
+       // 创建中断处理任务
+       let controller_clone = controller.clone();
+       let interrupt_handler = tokio::spawn(async move {
+           if let Ok(()) = signal::ctrl_c().await {
+               log::warn!("\n\n⚠️ 接收到中断信号，正在安全终止程序...\n稍等片刻，正在保存已处理的数据...\n");
+               controller_clone.set_interrupt_flag(true);
+           }
+       });
+          // 启动处理
+    let processing = controller.start_processing();
+    
       log::info!("\n程序执行完毕。");
       Ok(())
 }
